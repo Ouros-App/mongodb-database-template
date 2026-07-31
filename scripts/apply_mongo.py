@@ -10,7 +10,6 @@ import yaml
 from dotenv import load_dotenv
 from pymongo import MongoClient, ReturnDocument
 
-
 ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
 
 
@@ -29,11 +28,13 @@ def load_config(root: Path) -> dict:
     return expand(raw)
 
 
-def script_entries(root: Path, cfg: dict) -> list[tuple[Path, str]]:
+def script_entries(root: Path, cfg: dict) -> list[tuple[Path, str, bool, bool]]:
     directory = root / cfg["database"]["scripts_path"]
     entries, seen = [], set()
     for item in cfg["database"]["execution_order"]:
         name, mode = (item, "on_change") if isinstance(item, str) else (item.get("file"), item.get("mode", "on_change"))
+        transactional = item.get("transactional", True) if isinstance(item, dict) else True
+        idempotent = item.get("idempotent", False) if isinstance(item, dict) else False
         path = Path(name) if isinstance(name, str) else None
         identity = path.as_posix() if path else ""
         if not path or path.is_absolute() or ".." in path.parts or path.suffix != ".json" or identity in seen or mode not in {"always", "on_change", "once", "never"}:
@@ -42,7 +43,9 @@ def script_entries(root: Path, cfg: dict) -> list[tuple[Path, str]]:
         if not target.is_file():
             raise FileNotFoundError(f"Script MongoDB nao encontrado: {target}")
         seen.add(identity)
-        entries.append((target, mode))
+        if not transactional and not idempotent:
+            raise ValueError("Scripts nao transacionais devem declarar idempotent: true.")
+        entries.append((target, mode, transactional, idempotent))
     return entries
 
 
@@ -55,18 +58,38 @@ def apply_scripts(root: Path, cfg: dict, db, commit_id: str) -> None:
     control = db["controle_scripts_mongo"]
     control.create_index("arquivo", unique=True)
     base = root / cfg["database"]["scripts_path"]
-    for path, mode in script_entries(root, cfg):
+    for path, mode, transactional, _ in script_entries(root, cfg):
         identity = path.relative_to(base).as_posix()
         content = path.read_text(encoding="utf-8")
         checksum = hashlib.sha256(content.encode()).hexdigest()
         previous = control.find_one({"arquivo": identity})
-        if mode == "never" or (mode == "once" and previous) or (mode == "on_change" and previous and previous["checksum"] == checksum):
+        completed = previous and previous.get("status", "completed") == "completed"
+        if mode == "never" or (mode == "once" and completed) or (mode == "on_change" and completed and previous["checksum"] == checksum):
             print(f"[SKIP] {identity}: {mode}")
             continue
         commands = json.loads(content)
-        for command in commands if isinstance(commands, list) else [commands]:
-            db.command(command)
-        control.update_one({"arquivo": identity}, {"$set": {"checksum": checksum, "commit_id": commit_id}}, upsert=True)
+        commands = commands if isinstance(commands, list) else [commands]
+        if transactional:
+            with db.client.start_session() as session, session.start_transaction():
+                for command in commands:
+                    db.command(command, session=session)
+                control.update_one(
+                    {"arquivo": identity},
+                    {"$set": {"checksum": checksum, "commit_id": commit_id, "status": "completed", "next_command": len(commands)}},
+                    upsert=True,
+                    session=session,
+                )
+        else:
+            start = previous.get("next_command", 0) if previous and previous.get("checksum") == checksum and not completed else 0
+            control.update_one(
+                {"arquivo": identity},
+                {"$set": {"checksum": checksum, "commit_id": commit_id, "status": "running", "next_command": start}},
+                upsert=True,
+            )
+            for index, command in enumerate(commands[start:], start=start):
+                db.command(command)
+                control.update_one({"arquivo": identity}, {"$set": {"next_command": index + 1}})
+            control.update_one({"arquivo": identity}, {"$set": {"status": "completed"}})
         print(f"[RUN] {identity}: {mode}")
 
 
@@ -75,7 +98,11 @@ def main() -> None:
     load_dotenv(root / ".env")
     cfg = load_config(root)
     db_cfg = cfg["database"]
-    client = MongoClient(host=db_cfg["host"], port=int(db_cfg["port"]), username=db_cfg["user"], password=db_cfg["password"], authSource=db_cfg["auth_database"])
+    tls = str(db_cfg["tls"]).lower() in {"1", "true", "yes"}
+    tls_options = {"tls": tls}
+    if db_cfg.get("tls_ca_file"):
+        tls_options["tlsCAFile"] = db_cfg["tls_ca_file"]
+    client = MongoClient(host=db_cfg["host"], port=int(db_cfg["port"]), username=db_cfg["user"], password=db_cfg["password"], authSource=db_cfg["auth_database"], **tls_options)
     db = client[db_cfg["name"]]
     commit_id = os.getenv("GITHUB_SHA") or git_value(root, "rev-parse", "HEAD")
     commit_message = os.getenv("GITHUB_COMMIT_MESSAGE") or git_value(root, "log", "-1", "--pretty=%B")

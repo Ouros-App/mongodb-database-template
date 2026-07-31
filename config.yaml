@@ -7,6 +7,8 @@ database:
   user: ${MONGODB_USER}
   password: ${MONGODB_PASSWORD}
   auth_database: ${MONGODB_AUTH_DB}
+  tls: ${MONGODB_TLS}
+  tls_ca_file: ${MONGODB_TLS_CA_FILE}
   scripts_path: mongo
   version_collection: controle_versoes
   execution_order:
