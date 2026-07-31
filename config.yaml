@@ -1,0 +1,14 @@
+project: mongodb-database
+database:
+  engine: mongodb
+  host: ${MONGODB_HOST}
+  port: ${MONGODB_PORT}
+  name: ${MONGODB_DB}
+  user: ${MONGODB_USER}
+  password: ${MONGODB_PASSWORD}
+  auth_database: ${MONGODB_AUTH_DB}
+  scripts_path: mongo
+  version_collection: controle_versoes
+  execution_order:
+    - file: colecoes.json
+      mode: on_change
