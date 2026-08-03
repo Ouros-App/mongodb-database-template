@@ -1,4 +1,9 @@
 name: Apply MongoDB on main
+permissions:
+  contents: read
+concurrency:
+  group: apply-mongodb-main
+  cancel-in-progress: false
 on:
   push:
     branches: [main]
@@ -7,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -19,3 +26,5 @@ jobs:
           MONGODB_USER: ${{ secrets.MONGODB_USER }}
           MONGODB_PASSWORD: ${{ secrets.MONGODB_PASSWORD }}
           MONGODB_AUTH_DB: ${{ secrets.MONGODB_AUTH_DB }}
+          MONGODB_TLS: "true"
+          MONGODB_TLS_CA_FILE: ${{ secrets.MONGODB_TLS_CA_FILE }}
