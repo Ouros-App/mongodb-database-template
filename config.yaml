@@ -1,12 +1,7 @@
 project: mongodb-database
 database:
   engine: mongodb
-  host: ${MONGODB_HOST}
-  port: ${MONGODB_PORT}
-  name: ${MONGODB_DB}
-  user: ${MONGODB_USER}
-  password: ${MONGODB_PASSWORD}
-  auth_database: ${MONGODB_AUTH_DB}
+  connection_url: ${MONGODB_URI}
   tls: ${MONGODB_TLS}
   tls_ca_file: ${MONGODB_TLS_CA_FILE}
   scripts_path: mongo
