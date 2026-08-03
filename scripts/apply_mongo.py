@@ -103,7 +103,10 @@ def main() -> None:
     tls_options = {"tls": tls}
     if db_cfg.get("tls_ca_file"):
         tls_options["tlsCAFile"] = db_cfg["tls_ca_file"]
-    client = MongoClient(db_cfg["connection_url"], **tls_options)
+    try:
+        client = MongoClient(db_cfg["connection_url"], **tls_options)
+    except ConfigurationError as exc:
+        raise ValueError("MONGODB_URI deve conter uma URL MongoDB valida com host, por exemplo mongodb+srv://usuario:senha@cluster.mongodb.net/banco.") from exc
     try:
         db = client[db_cfg["name"]] if db_cfg.get("name") else client.get_default_database()
     except ConfigurationError as exc:
