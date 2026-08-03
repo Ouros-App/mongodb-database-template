@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 from dotenv import load_dotenv
@@ -103,7 +104,10 @@ def main() -> None:
     if db_cfg.get("tls_ca_file"):
         tls_options["tlsCAFile"] = db_cfg["tls_ca_file"]
     client = MongoClient(db_cfg["connection_url"], **tls_options)
-    db = client[db_cfg["name"]]
+    database_name = db_cfg.get("name") or urlsplit(db_cfg["connection_url"]).path.strip("/")
+    if not database_name:
+        raise ValueError("A URI MongoDB deve informar o banco no caminho da URL.")
+    db = client[database_name]
     commit_id = os.getenv("GITHUB_SHA") or git_value(root, "rev-parse", "HEAD")
     commit_message = os.getenv("GITHUB_COMMIT_MESSAGE") or git_value(root, "log", "-1", "--pretty=%B")
     if commit_id == "unknown":
