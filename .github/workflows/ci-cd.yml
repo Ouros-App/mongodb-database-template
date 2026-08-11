@@ -3,12 +3,14 @@ permissions:
   contents: read
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     branches: [main]
   push:
     branches: [main]
 jobs:
   ci:
     runs-on: ubuntu-latest
+    if: github.event.action != 'labeled' || github.event.label.name == 'rerun-ci'
     steps:
       - uses: actions/checkout@v4
         with:
